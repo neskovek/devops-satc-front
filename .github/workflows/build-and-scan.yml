@@ -1,6 +1,5 @@
 name: build and scan
 
-
 on:
   workflow_call:
   push:
@@ -25,7 +24,7 @@ jobs:
             -Dsonar.projectKey=neskovek_devops-satc-front
             -Dsonar.organization=neskovek
             -Dsonar.host.url=https://sonarcloud.io
-            -Dsonar.sources=.
+            -Dsonar.sources=src
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
@@ -36,19 +35,16 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build Docker image
-        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/satc-devops:0.0.2 .
+        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/devops-satc-front:0.0.2 .
 
       - name: Push Docker image
-        run: docker push docker.io/${{ secrets.DOCKER_USERNAME }}/satc-devops:0.0.2
-
-      - name: Pull image
-        run: docker pull docker.io/${{ secrets.DOCKER_USERNAME }}/satc-devops:0.0.2
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/devops-satc-front:0.0.2
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'image'
-          image-ref: 'docker.io/${{ secrets.DOCKER_USERNAME }}/satc-devops:0.0.2'
+          image-ref: 'docker.io/${{ secrets.DOCKER_USERNAME }}/devops-satc-front:0.0.2'
           format: json
           output: trivy-results.json
           severity: MEDIUM,HIGH,CRITICAL
@@ -61,20 +57,30 @@ jobs:
 
       - name: Analyze Trivy results
         run: |
-          if [ -f trivy-results.json ]; then
-            VULN_COUNT_MEDIUM=$(jq '[.Results[].Vulnerabilities[] | select(.Severity == "MEDIUM")] | length' trivy-results.json)
-            echo "Quantidade de vulnerabilidades mÃ©dias: $VULN_COUNT_MEDIUM"
-          fi
-          if [ -f trivy-results.json ]; then
-            VULN_COUNT_HIGH=$(jq '[.Results[].Vulnerabilities[] | select(.Severity == "HIGH")] | length' trivy-results.json)
-            echo "Quantidade de vulnerabilidades altas: $VULN_COUNT_HIGH"
-          fi
+          VULN_COUNT_MEDIUM=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' trivy-results.json || echo 0)
+          VULN_COUNT_HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-results.json || echo 0)
+          VULN_COUNT_CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-results.json || echo 0)
+
+          echo "---------------------------------------"
+          echo "Relatorio de Seguranca:"
+          echo "Medias: $VULN_COUNT_MEDIUM"
+          echo "Altas: $VULN_COUNT_HIGH"
+          echo "Criticas: $VULN_COUNT_CRITICAL"
+          echo "---------------------------------------"
 
           if [ "$VULN_COUNT_MEDIUM" -gt 5 ]; then
-             echo "Pipeline bloqueada: mais de 5 vulnerabilidades mÃ©dias encontradas."
+             echo "[ERRO] Bloqueado: Mais de 5 vulnerabilidades MEDIAS."
              exit 1
-           fi
+          fi
+
           if [ "$VULN_COUNT_HIGH" -gt 5 ]; then
-             echo "Pipeline bloqueada: mais de 5 vulnerabilidades altas encontradas."
+             echo "[ERRO] Bloqueado: Mais de 5 vulnerabilidades ALTAS."
              exit 1
-           fi
+          fi
+
+          if [ "$VULN_COUNT_CRITICAL" -gt 0 ]; then
+             echo "[ERRO] Bloqueado: Vulnerabilidade CRITICA encontrada."
+             exit 1
+          fi
+          
+          echo "[SUCESSO] Imagem aprovada nos requisitos de seguranca."
